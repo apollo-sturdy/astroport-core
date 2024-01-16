@@ -4,7 +4,7 @@ use cw_ownable::cw_ownable_execute;
 
 use crate::asset::{Asset, AssetInfo, PairInfo};
 
-use cosmwasm_std::{Addr, Binary, Coin, Decimal, Decimal256, Uint128, Uint64};
+use cosmwasm_std::{Addr, Binary, Coin, Coins, Decimal, Decimal256, Uint128, Uint64};
 
 /// The default swap slippage
 pub const DEFAULT_SLIPPAGE: &str = "0.005";
@@ -39,6 +39,44 @@ pub struct FlashSwapHookMsg {
     pub required_payment: Coin,
     /// The binary encoded ExecuteMsg that will be called on the contract that initiated the flash swap
     pub msg: Binary,
+}
+
+pub enum SlippageControl {
+    MinLpAmount(Uint128),
+    Tolerance {
+        slippage_tolerance: Decimal,
+        belief_price: Decimal,
+    },
+}
+
+impl SlippageControl {
+    fn assert_max_slippage(
+        &self,
+        old_price: Decimal,
+        new_price: Decimal,
+        lp_tokens_minted: Uint128,
+    ) {
+        match self {
+            SlippageControl::MinLpAmount(min_lp_amount) => {
+                if lp_tokens_minted < *min_lp_amount {
+                    panic!("Slippage tolerance not met: lp_tokens_minted < min_lp_amount");
+                }
+            }
+            SlippageControl::Tolerance {
+                slippage_tolerance,
+                belief_price,
+            } => {
+                let slippage = new_price / old_price - Decimal::one();
+                if slippage > *slippage_tolerance {
+                    panic!("Slippage tolerance not met: slippage > slippage_tolerance");
+                }
+                let belief_slippage = new_price / *belief_price - Decimal::one();
+                if belief_slippage > *slippage_tolerance {
+                    panic!("Slippage tolerance not met: belief_slippage > slippage_tolerance");
+                }
+            }
+        }
+    }
 }
 
 /// This structure describes the execute messages available in the contract.
@@ -104,6 +142,10 @@ pub enum ExecuteMsg {
         /// must instead be sent to the pool at some point before the callback message has finished
         /// executing. The supplied message will be wrapped in a `Pair::FlashSwapHookMsg` message.
         callback: Option<Binary>,
+        /// The assets to swap for the asset specified in the `ask` field. If not specified,
+        /// the native tokens sent to the contract will be swapped. This is only required if the
+        /// `callback` field is supplied, to enable flashswapping.
+        offer_denom: Option<String>,
     },
     /// Update the pair configuration
     UpdateConfig { params: Binary },
@@ -126,67 +168,95 @@ pub enum Cw20HookMsg {
     },
 }
 
+/// This structure stores the main parameters for an Astroport pair
+#[cw_serde]
+pub struct PoolInfoResponse {
+    /// Asset information for the assets in the pool
+    pub asset_infos: Vec<AssetInfo>,
+    /// Pair contract address
+    pub contract_addr: Addr,
+    /// Pair LP token address
+    pub liquidity_token: Addr,
+    /// The pool type (xyk, stableswap etc) available in [`PairType`]
+    pub pair_type: PairType,
+}
+
 /// This structure describes the query messages available in the contract.
 #[cw_serde]
 #[derive(QueryResponses)]
-pub enum QueryMsg {
+pub enum QueryMsg<T = Empty> {
     /// Returns information about a pair in an object of type [`super::asset::PairInfo`].
-    #[returns(PairInfo)]
-    Pair {},
+    #[returns(PoolInfo)]
+    PoolInfo {},
+
     /// Returns information about a pool in an object of type [`PoolResponse`].
-    #[returns(PoolResponse)]
-    Pool {},
+    #[returns(PoolSateResponse)]
+    PoolState {},
+
     /// Returns contract configuration settings in a custom [`ConfigResponse`] structure.
     #[returns(ConfigResponse)]
     Config {},
-    /// Returns information about the share of the pool in a vector that contains objects of type [`Asset`].
-    #[returns(Vec<Asset>)]
-    Share { amount: Uint128 },
-    /// Returns information about a swap simulation in a [`SimulationResponse`] object.
-    #[returns(SimulationResponse)]
-    Simulation {
-        offer_asset: Asset,
-        ask_asset_info: Option<AssetInfo>,
+
+    /// Simulates withdrawing liquidity from the pool and returns the amount of assets that would be received.
+    #[returns(Vec<Coin>)]
+    SimulateWithdrawLiquidity { amount: Uint128 },
+
+    /// Simulates a swap with exact amounts of offer assets and returns a `SimulateSwapResponse` object.
+    #[returns(SimulateSwapResponse)]
+    SimulateSwapExactIn {
+        /// The asset to receive from the swap
+        ask_denom: String,
+        /// The assets to swap for the asset specified in the `ask_denom` field. If not specified,
+        /// the native tokens sent to the contract will be swapped. This is only required if the
+        /// `callback` field is supplied, to enable flashswapping.
+        offer_assets: Vec<Coin>,
+        /// The pool reserves to use for the simulation. If not specified, the current reserves will be used.
+        reserves: Option<Vec<Coin>>,
+        /// The parameters unique to the current pool type to use for the simulation. If not specified, the current parameters will be used.
+        params: Option<Binary>,
     },
-    /// Returns information about cumulative prices in a [`ReverseSimulationResponse`] object.
-    #[returns(ReverseSimulationResponse)]
-    ReverseSimulation {
-        offer_asset_info: Option<AssetInfo>,
-        ask_asset: Asset,
+
+    /// Simulates a swap with an exact amount of an asset to receive and returns a `SimulateSwapResponse` object.
+    #[returns(SimulateSwapResponse)]
+    SimulateSwapExactOut {
+        /// The asset to receive from the swap
+        ask: Coin,
+        /// The asset to swap for the asset specified in the `ask` field.
+        offer_denom: String,
     },
+
     /// Returns information about the cumulative prices in a [`CumulativePricesResponse`] object
     #[returns(CumulativePricesResponse)]
     CumulativePrices {},
-    /// Returns current D invariant in as a [`u128`] value
-    #[returns(Uint128)]
-    QueryComputeD {},
-    /// Returns the balance of the specified asset that was in the pool just preceeding the moment of the specified block height creation.
-    #[returns(Option<Uint128>)]
-    AssetBalanceAt {
-        asset_info: AssetInfo,
-        block_height: Uint64,
-    },
+
     /// Query price from observations
     #[returns(OracleObservation)]
     Observe { seconds_ago: u64 },
+
+    /// Returns the reserves that were in the pool prior to the given block height
+    #[returns(Vec<Coin>)]
+    PoolReservesAtHeight { block_height: Uint64 },
+
+    /// Queries specific to the pool type
+    PoolTypeQueries(T),
 }
 
 /// This struct is used to return a query result with the total amount of LP tokens and assets in a specific pool.
 #[cw_serde]
-pub struct PoolResponse {
+pub struct PoolSateResponse {
     /// The assets in the pool together with asset amounts
-    pub assets: Vec<Asset>,
+    pub pool_reserves: Vec<Coin>,
     /// The total amount of LP tokens currently issued
-    pub total_share: Uint128,
+    pub lp_token_supply: Uint128,
 }
 
 /// This struct is used to return a query result with the general contract configuration.
 #[cw_serde]
-pub struct ConfigResponse {
+pub struct ConfigResponse<T = Empty> {
     /// Last timestamp when the cumulative prices in the pool were updated
     pub block_time_last: u64,
     /// The pool's parameters
-    pub params: Option<Binary>,
+    pub params: Option<T>,
     /// The contract owner
     pub owner: Addr,
     /// The factory contract address
@@ -204,35 +274,21 @@ pub struct FeeShareConfig {
 
 /// This structure holds the parameters that are returned from a swap simulation response
 #[cw_serde]
-pub struct SimulationResponse {
+pub struct SimulateSwapResponse<T> {
+    /// The amount of offer assets sent to the swap
+    pub offer_amount: Uint128,
     /// The amount of ask assets returned by the swap
     pub return_amount: Uint128,
-    /// The spread used in the swap operation
-    pub spread_amount: Uint128,
+    /// The change in spot price caused by the swap, in percentage form
+    pub price_impact: Decimal,
     /// The amount of fees charged by the transaction
-    pub commission_amount: Uint128,
-}
-
-/// This structure holds the parameters that are returned from a reverse swap simulation response.
-#[cw_serde]
-pub struct ReverseSimulationResponse {
-    /// The amount of offer assets returned by the reverse swap
-    pub offer_amount: Uint128,
-    /// The spread used in the swap operation
-    pub spread_amount: Uint128,
-    /// The amount of fees charged by the transaction
-    pub commission_amount: Uint128,
-}
-
-/// This structure is used to return a cumulative prices query response.
-#[cw_serde]
-pub struct CumulativePricesResponse {
-    /// The assets in the pool to query
-    pub assets: Vec<Asset>,
-    /// The total amount of LP tokens currently issued
-    pub total_share: Uint128,
-    /// The vector contains cumulative prices for each pair of assets in the pool
-    pub cumulative_prices: Vec<(AssetInfo, AssetInfo, Uint128)>,
+    pub commission_amount: Coin,
+    /// The difference in percentage between the prior spot price and the execution price
+    pub slippage: Decimal,
+    /// The pool reserves after the swap
+    pub reserves_after: Vec<Coin>,
+    /// The parameters unique to the current pool type after the swap
+    pub parameters_after: Option<T>,
 }
 
 /// This structure describes a migration message.
