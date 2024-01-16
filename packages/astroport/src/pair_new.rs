@@ -33,6 +33,14 @@ pub struct InstantiateMsg {
     pub init_params: Option<Binary>,
 }
 
+#[cw_serde]
+pub struct FlashSwapHookMsg {
+    /// This is the amount and denom of the token that should be sent back to the pool. In the case of SwapExactIn
+    pub required_payment: Coin,
+    /// The binary encoded ExecuteMsg that will be called on the contract that initiated the flash swap
+    pub msg: Binary,
+}
+
 /// This structure describes the execute messages available in the contract.
 #[cw_ownable_execute]
 #[cw_serde]
@@ -48,6 +56,18 @@ pub enum ExecuteMsg {
         /// The recipient of the minted LP tokens
         recipient: Option<String>,
     },
+    /// Withdraws liquidity from the pool. LP tokens should be sent along with the message to the contract.
+    WithdrawLiquidity {
+        /// The minimum amount of each asset to receive from the pool. If the amount received is
+        /// less than this, the transaction will revert.
+        min_out: Vec<Coin>,
+    },
+    FlashLoan {
+        /// The asset to receive from the swap
+        receive: Coin,
+        /// A binary encoded ExecuteMsg to be called on the sender with the borrowed funds. The message will be wrapped in a `Pair::FlashSwapHookMsg` message.
+        msg: Binary,
+    },
     /// Swaps all the native tokens sent to the contract for the asset specified with the `ask_denom` field.
     SwapExactIn {
         /// The asset to receive from the swap
@@ -57,11 +77,15 @@ pub enum ExecuteMsg {
         min_out: Option<Uint128>,
         /// The address to send the swapped tokens to. If not specified, the tokens will be sent to the caller.
         recipient: Option<String>,
+        /// The assets to swap for the asset specified in the `ask_denom` field. If not specified,
+        /// the native tokens sent to the contract will be swapped. This is only required if the
+        /// `callback` field is supplied, to enable flashswapping.
+        offer_assets: Option<Vec<Coin>>,
         /// A binary encoded CosmosMsg used to enable flash swaps. If supplied, the funds
         /// received from the swap will be sent along with this message as a response to the swap
         /// without validating that the required offer assets have been supplied. The offer assets
         /// must instead be sent to the pool at some point before the callback message has finished
-        /// executing.
+        /// executing. The supplied message will be wrapped in a `Pair::FlashSwapHookMsg` message.
         callback: Option<Binary>,
     },
     /// Swaps some amount of the sent native tokens for exactly the amount and denom specified in the `ask` field.
@@ -71,9 +95,15 @@ pub enum ExecuteMsg {
         ask: Coin,
         /// The maximum amount of native tokens to offer for the swap. If the amount needed to
         /// receive the requested asset is greater than this, the transaction will revert.
-        max_in: Option<Uint128>,
+        max_in: Option<Coin>,
         /// The address to send the swapped tokens to. If not specified, the tokens will be sent to the caller.
         recipient: Option<String>,
+        /// A binary encoded CosmosMsg used to enable flash swaps. If supplied, the funds
+        /// received from the swap will be sent along with this message as a response to the swap
+        /// without validating that the required offer assets have been supplied. The offer assets
+        /// must instead be sent to the pool at some point before the callback message has finished
+        /// executing. The supplied message will be wrapped in a `Pair::FlashSwapHookMsg` message.
+        callback: Option<Binary>,
     },
     /// Update the pair configuration
     UpdateConfig { params: Binary },
