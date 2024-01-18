@@ -2,9 +2,7 @@ use crate::observation::OracleObservation;
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cw_ownable::cw_ownable_execute;
 
-use crate::asset::{Asset, AssetInfo, PairInfo};
-
-use cosmwasm_std::{Addr, Binary, Coin, Coins, Decimal, Decimal256, Uint128, Uint64};
+use cosmwasm_std::{coin, Addr, Binary, Coin, Decimal, Decimal256, Empty, Uint128, Uint64};
 
 /// The default swap slippage
 pub const DEFAULT_SLIPPAGE: &str = "0.005";
@@ -22,44 +20,126 @@ pub const MIN_TRADE_SIZE: Decimal256 = Decimal256::raw(10000000000000);
 
 /// This structure describes the parameters used for creating a contract.
 #[cw_serde]
-pub struct InstantiateMsg {
-    /// Information about assets in the pool
-    pub asset_infos: Vec<AssetInfo>,
-    /// The token contract code ID used for the tokens in the pool
-    pub token_code_id: u64,
+pub struct InstantiateMsg<P = Empty> {
+    /// The token denoms of the assets in the pool
+    pub reserve_denoms: Vec<String>,
     /// The factory contract address
     pub factory_addr: String,
-    /// Optional binary serialised parameters for custom pool types
-    pub init_params: Option<Binary>,
+    /// Optional parameters specific to the pool type
+    pub init_params: Option<P>,
 }
 
 #[cw_serde]
 pub struct FlashSwapHookMsg {
-    /// This is the amount and denom of the token that should be sent back to the pool. In the case of SwapExactIn
-    pub required_payment: Coin,
-    /// The binary encoded ExecuteMsg that will be called on the contract that initiated the flash swap
-    pub msg: Binary,
+    /// This vec contains options for repaying the loan. Each coin in the vec contains the amount
+    /// and denom of a token that should be sent back to the pool. The user should send one of the
+    /// coins in the vec back to the pool to repay the loan, but not more than one.
+    pub required_payment: Vec<Coin>,
+    /// An optional binary encoded message passed to the calling contract.
+    pub msg: Option<Binary>,
 }
 
+#[cw_serde]
 pub enum SlippageControl {
-    MinLpAmount(Uint128),
+    /// The minimum amount of each token to receive from the action.
+    /// If this action is `ProvideLiquidity`, the vec should contain exactly one coin with the denom
+    /// being the LP token denom.
+    /// If this action is `WithdrawLiquidity`, the vec should contain amounts of each of the tokens
+    /// you wish to receive from the pool.
+    /// If this action is `SwapExactIn`, the vec should contain exactly one coin with the denom
+    /// being the asset you wish to receive from the swap.
+    /// If this action is `SwapExactOut`, this form of slippage control is not supported and will
+    /// error.
+    MinOut(Vec<Coin>),
+    /// The maximum amount of each token to spend on the action.
+    /// If this action is `ProvideLiquidity`, the vec should contain amounts of each of the tokens
+    /// you wish to provide as liquidity on the pool.
+    /// If this action is `SwapExactOut`, the vec should contain amounts of each of the tokens
+    /// you wish to spend on the swap.
+    /// If this action is `SwapExactIn` or `WithdrawLiquidity`, this form of slippage control is not
+    /// supported and will error.
+    MaxIn(Vec<Coin>),
+    /// Protects the user from slippage by ensuring that the price of the pool does not move too much.
+    /// This form of slippage control is supported for all actions.
     Tolerance {
-        slippage_tolerance: Decimal,
+        /// The user's belief of the price of the pool before the action.
         belief_price: Decimal,
+        /// The maximum amount of slippage that is allowed. If the price of the pool after the
+        /// action is more than `slippage_tolerance` different from the price supplied in the
+        /// `belief_price` field, the transaction will revert.
+        slippage_tolerance: Decimal,
+    },
+}
+
+pub enum ProvideLiquiditySlippageControl {
+    MinOutLpAmount(Uint128),
+    Tolerance {
+        belief_price: Decimal,
+        slippage_tolerance: Decimal,
+    },
+}
+
+pub enum WithdrawLiquiditySlippageControl {
+    MinOut(Vec<Coin>),
+    Tolerance {
+        belief_price: Decimal,
+        slippage_tolerance: Decimal,
+    },
+}
+
+pub enum SwapExactInSlippageControl {
+    MinOut(Uint128),
+    Tolerance {
+        belief_price: Decimal,
+        slippage_tolerance: Decimal,
+    },
+}
+
+pub enum SwapExactOutSlippageControl {
+    MaxIn(Vec<Coin>),
+    Tolerance {
+        belief_price: Decimal,
+        slippage_tolerance: Decimal,
     },
 }
 
 impl SlippageControl {
-    fn assert_max_slippage(
+    pub fn assert_max_slippage(
         &self,
         old_price: Decimal,
         new_price: Decimal,
-        lp_tokens_minted: Uint128,
+        tokens_consumed: Vec<Coin>,
+        tokens_sent: Vec<Coin>,
     ) {
         match self {
-            SlippageControl::MinLpAmount(min_lp_amount) => {
-                if lp_tokens_minted < *min_lp_amount {
-                    panic!("Slippage tolerance not met: lp_tokens_minted < min_lp_amount");
+            SlippageControl::MinOut(min_out_coins) => {
+                for x in min_out_coins {
+                    let sent = tokens_sent
+                        .clone()
+                        .into_iter()
+                        .find(|c| c.denom == x.denom)
+                        .unwrap_or_else(|| coin(0u128, &x.denom));
+                    if sent.amount < x.amount {
+                        panic!(
+                            "Token {} sent to the user is less than the minimum required",
+                            x.denom.to_string()
+                        );
+                    }
+                }
+            }
+            SlippageControl::MaxIn(max_in_coins) => {
+                for x in max_in_coins {
+                    let consumed = tokens_consumed
+                        .clone()
+                        .into_iter()
+                        .find(|c| c.denom == x.denom)
+                        .unwrap_or_else(|| coin(0u128, &x.denom));
+                    if consumed.amount > x.amount {
+                        panic!(
+                            "Token {} consumed from the user is more than the maximum allowed",
+                            x.denom.to_string()
+                        );
+                    }
                 }
             }
             SlippageControl::Tolerance {
@@ -82,7 +162,7 @@ impl SlippageControl {
 /// This structure describes the execute messages available in the contract.
 #[cw_ownable_execute]
 #[cw_serde]
-pub enum ExecuteMsg {
+pub enum ExecuteMsg<U> {
     /// Provides liquidity to the pool with the native tokens sent to the contract.
     /// Only those tokens that are already in the pool can be provided. If any additional tokens
     /// are sent, the transaction will revert.
@@ -93,19 +173,32 @@ pub enum ExecuteMsg {
         auto_stake: Option<bool>,
         /// The recipient of the minted LP tokens
         recipient: Option<String>,
+
+        /// Parameters for slippage control
+        slippage_control: SlippageControl,
     },
+
     /// Withdraws liquidity from the pool. LP tokens should be sent along with the message to the contract.
     WithdrawLiquidity {
         /// The minimum amount of each asset to receive from the pool. If the amount received is
         /// less than this, the transaction will revert.
         min_out: Vec<Coin>,
+
+        /// Parameters for slippage control
+        slippage_control: SlippageControl,
     },
+
+    /// Loans the requested tokens from the pool to the calling contract. The tokens will be sent
+    /// to the calling contract's address as part of a contract execution with ExecuteMsg
+    /// `FlashLoanReceive(FlashSwapHookMsg)`.
     FlashLoan {
-        /// The asset to receive from the swap
+        /// The asset to receive as a loan
         receive: Coin,
-        /// A binary encoded ExecuteMsg to be called on the sender with the borrowed funds. The message will be wrapped in a `Pair::FlashSwapHookMsg` message.
-        msg: Binary,
+        /// An optional binary encoded message to be sent back to the calling contract. This will be
+        /// included wrapped inside of the `FlashSwapHookMsg` that is sent back to the calling contract.
+        msg: Option<Binary>,
     },
+
     /// Swaps all the native tokens sent to the contract for the asset specified with the `ask_denom` field.
     SwapExactIn {
         /// The asset to receive from the swap
@@ -123,9 +216,10 @@ pub enum ExecuteMsg {
         /// received from the swap will be sent along with this message as a response to the swap
         /// without validating that the required offer assets have been supplied. The offer assets
         /// must instead be sent to the pool at some point before the callback message has finished
-        /// executing. The supplied message will be wrapped in a `Pair::FlashSwapHookMsg` message.
+        /// executing. The supplied message will be wrapped in a `FlashSwapHookMsg` message.
         callback: Option<Binary>,
     },
+
     /// Swaps some amount of the sent native tokens for exactly the amount and denom specified in the `ask` field.
     /// Any remaining unused tokens will be sent back to the sender.
     SwapExactOut {
@@ -133,60 +227,59 @@ pub enum ExecuteMsg {
         ask: Coin,
         /// The maximum amount of native tokens to offer for the swap. If the amount needed to
         /// receive the requested asset is greater than this, the transaction will revert.
-        max_in: Option<Coin>,
+        max_in: Option<Vec<Coin>>,
         /// The address to send the swapped tokens to. If not specified, the tokens will be sent to the caller.
         recipient: Option<String>,
         /// A binary encoded CosmosMsg used to enable flash swaps. If supplied, the funds
         /// received from the swap will be sent along with this message as a response to the swap
         /// without validating that the required offer assets have been supplied. The offer assets
         /// must instead be sent to the pool at some point before the callback message has finished
-        /// executing. The supplied message will be wrapped in a `Pair::FlashSwapHookMsg` message.
+        /// executing. The supplied message will be wrapped in a `FlashSwapHookMsg` message.
         callback: Option<Binary>,
         /// The assets to swap for the asset specified in the `ask` field. If not specified,
         /// the native tokens sent to the contract will be swapped. This is only required if the
         /// `callback` field is supplied, to enable flashswapping.
         offer_denom: Option<String>,
     },
-    /// Update the pair configuration
-    UpdateConfig { params: Binary },
+
+    /// Update the pool configuration
+    UpdateConfig { updates: U },
 }
 
-/// This structure describes a CW20 hook message.
+/// Available pool types
+#[derive(Eq)]
 #[cw_serde]
-pub enum Cw20HookMsg {
-    /// Swap a given amount of asset
-    Swap {
-        ask_asset_info: Option<AssetInfo>,
-        belief_price: Option<Decimal>,
-        max_spread: Option<Decimal>,
-        to: Option<String>,
-    },
-    /// Withdraw liquidity from the pool
-    WithdrawLiquidity {
-        #[serde(default)]
-        assets: Vec<Asset>,
-    },
+#[non_exhaustive]
+pub enum PoolType {
+    /// XYK pool type
+    Xyk {},
+    /// Stable pool type
+    Stable {},
+    /// Passive Concentraced Liquidity pool type
+    Pcl {},
+    /// Custom pool type
+    Custom(String),
 }
 
-/// This structure stores the main parameters for an Astroport pair
+/// This structure stores the main parameters for an Astroport pool
 #[cw_serde]
 pub struct PoolInfoResponse {
-    /// Asset information for the assets in the pool
-    pub asset_infos: Vec<AssetInfo>,
-    /// Pair contract address
+    /// The token denoms of the assets in the pool
+    pub reserve_denoms: Vec<String>,
+    /// Pool contract address
     pub contract_addr: Addr,
-    /// Pair LP token address
-    pub liquidity_token: Addr,
-    /// The pool type (xyk, stableswap etc) available in [`PairType`]
-    pub pair_type: PairType,
+    /// Pool LP token denom
+    pub liquidity_token_denom: String,
+    /// The pool type (xyk, stableswap, etc) available in [`PoolType`]
+    pub pool_type: PoolType,
 }
 
 /// This structure describes the query messages available in the contract.
 #[cw_serde]
 #[derive(QueryResponses)]
-pub enum QueryMsg<T = Empty> {
-    /// Returns information about a pair in an object of type [`super::asset::PairInfo`].
-    #[returns(PoolInfo)]
+pub enum QueryMsg<T = Empty, P = Empty> {
+    /// Returns information about the pool in an object of type [`PoolInfoResponse`].
+    #[returns(PoolInfoResponse)]
     PoolInfo {},
 
     /// Returns information about a pool in an object of type [`PoolResponse`].
@@ -202,7 +295,7 @@ pub enum QueryMsg<T = Empty> {
     SimulateWithdrawLiquidity { amount: Uint128 },
 
     /// Simulates a swap with exact amounts of offer assets and returns a `SimulateSwapResponse` object.
-    #[returns(SimulateSwapResponse)]
+    #[returns(SimulateSwapResponse<P>)]
     SimulateSwapExactIn {
         /// The asset to receive from the swap
         ask_denom: String,
@@ -213,21 +306,17 @@ pub enum QueryMsg<T = Empty> {
         /// The pool reserves to use for the simulation. If not specified, the current reserves will be used.
         reserves: Option<Vec<Coin>>,
         /// The parameters unique to the current pool type to use for the simulation. If not specified, the current parameters will be used.
-        params: Option<Binary>,
+        params: Option<P>,
     },
 
     /// Simulates a swap with an exact amount of an asset to receive and returns a `SimulateSwapResponse` object.
-    #[returns(SimulateSwapResponse)]
+    #[returns(SimulateSwapResponse<P>)]
     SimulateSwapExactOut {
         /// The asset to receive from the swap
         ask: Coin,
         /// The asset to swap for the asset specified in the `ask` field.
         offer_denom: String,
     },
-
-    /// Returns information about the cumulative prices in a [`CumulativePricesResponse`] object
-    #[returns(CumulativePricesResponse)]
-    CumulativePrices {},
 
     /// Query price from observations
     #[returns(OracleObservation)]
@@ -238,7 +327,12 @@ pub enum QueryMsg<T = Empty> {
     PoolReservesAtHeight { block_height: Uint64 },
 
     /// Queries specific to the pool type
+    #[returns(Empty)]
     PoolTypeQueries(T),
+
+    #[returns(Empty)]
+    #[serde(skip_serializing)]
+    _PhantomData(std::marker::PhantomData<P>),
 }
 
 /// This struct is used to return a query result with the total amount of LP tokens and assets in a specific pool.
@@ -363,69 +457,4 @@ pub enum StablePoolUpdateParams {
         fee_share_address: String,
     },
     DisableFeeShare,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::asset::native_asset_info;
-    use cosmwasm_std::{from_binary, from_slice, to_binary};
-
-    #[cw_serde]
-    pub struct LegacyInstantiateMsg {
-        pub asset_infos: [AssetInfo; 2],
-        pub token_code_id: u64,
-        pub factory_addr: String,
-        pub init_params: Option<Binary>,
-    }
-
-    #[cw_serde]
-    pub struct LegacyConfigResponse {
-        pub block_time_last: u64,
-        pub params: Option<Binary>,
-        pub factory_addr: Addr,
-        pub owner: Addr,
-    }
-
-    #[test]
-    fn test_init_msg_compatability() {
-        let inst_msg = LegacyInstantiateMsg {
-            asset_infos: [
-                native_asset_info("uusd".to_string()),
-                native_asset_info("uluna".to_string()),
-            ],
-            token_code_id: 0,
-            factory_addr: "factory".to_string(),
-            init_params: None,
-        };
-
-        let ser_msg = to_binary(&inst_msg).unwrap();
-        // This .unwrap() is enough to make sure that [AssetInfo; 2] and Vec<AssetInfo> are compatible.
-        let _: InstantiateMsg = from_binary(&ser_msg).unwrap();
-    }
-
-    #[test]
-    fn test_config_response_compatability() {
-        let ser_msg = to_binary(&LegacyConfigResponse {
-            block_time_last: 12,
-            params: Some(
-                to_binary(&StablePoolConfig {
-                    amp: Decimal::one(),
-                    fee_share: None,
-                })
-                .unwrap(),
-            ),
-            factory_addr: Addr::unchecked(""),
-            owner: Addr::unchecked(""),
-        })
-        .unwrap();
-
-        let _: ConfigResponse = from_binary(&ser_msg).unwrap();
-    }
-
-    #[test]
-    fn check_empty_vec_deserialization() {
-        let variant: Cw20HookMsg = from_slice(br#"{"withdraw_liquidity": {} }"#).unwrap();
-        assert_eq!(variant, Cw20HookMsg::WithdrawLiquidity { assets: vec![] });
-    }
 }
