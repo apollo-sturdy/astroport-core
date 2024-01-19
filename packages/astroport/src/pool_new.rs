@@ -1,4 +1,4 @@
-use crate::observation::OracleObservation;
+use crate::observation::Observation;
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cw_ownable::cw_ownable_execute;
 
@@ -199,12 +199,28 @@ pub enum QueryMsg<Q = Empty, P = Empty> {
         params: Option<P>,
     },
 
-    /// Query the oracle price.
-    #[returns(OracleObservation)]
-    OraclePrice {
-        /// The UNIX timestamp in seconds at which to query the oracle price. The closest observation
-        /// to this timestamp will be used.
-        timestamp: u64,
+    /// Queries the time weighted average price of the `base_denom` asset quoted in terms of number
+    /// of `quote_denom` assets.
+    #[returns(Decimal)]
+    TwapPrice {
+        /// The denom of the asset to query the price for
+        base_denom: String,
+        /// The denom of the asset to quote the price in
+        quote_denom: String,
+        /// The UNIX timestamp in seconds of the start of the time window
+        start_time: u64,
+        /// The UNIX timestamp in seconds of the end of the time window
+        end_time: u64,
+    },
+
+    /// Queries all of the stored oracle observations
+    #[returns(Vec<Observation>)]
+    OracleObservations {
+        /// How many observations to return. If not specified, the query will try to return all
+        /// observations, although this fail if gas limits are exceeded.
+        limit: Option<u32>,
+        /// The UNIX timestamp in seconds after which to start returning observations
+        start_after: Option<u64>,
     },
 
     /// Returns the reserves that were in the pool prior to the given block height
