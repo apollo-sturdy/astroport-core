@@ -5,6 +5,9 @@ use cw_ownable::cw_ownable_execute;
 use cosmwasm_std::{Addr, Binary, Coin, Decimal, Empty, Uint128, Uint64};
 
 /// This structure describes the parameters used for creating a contract.
+///
+/// Generics:
+/// - `P` - The parameters unique to the current pool type
 #[cw_serde]
 pub struct InstantiateMsg<P = Empty> {
     /// The token denoms of the assets in the pool
@@ -16,7 +19,7 @@ pub struct InstantiateMsg<P = Empty> {
 }
 
 #[cw_serde]
-pub struct FlashSwapHookMsg {
+pub struct FlashLoanHookMsg {
     /// This vec contains options for repaying the loan. Each coin in the vec contains the amount
     /// and denom of a token that can be used to pay back the loan.
     pub required_payment: Vec<Coin>,
@@ -36,9 +39,12 @@ pub struct SlippageControl {
 }
 
 /// This structure describes the execute messages available in the contract.
+///
+/// Generics:
+/// - `U` - The config update messages specific to the pool type
 #[cw_ownable_execute]
 #[cw_serde]
-pub enum ExecuteMsg<U> {
+pub enum ExecuteMsg<U = Empty> {
     /// Provides liquidity to the pool with the native tokens sent to the contract.
     /// Only those tokens that are already in the pool can be provided. If any additional tokens
     /// are sent, the transaction will revert.
@@ -94,16 +100,15 @@ pub enum ExecuteMsg<U> {
 
     /// Borrows the requested tokens from the pool to the calling contract. The tokens will be sent
     /// to the calling contract (or the contract specified in the `recipient_contract` field) as part
-    /// of a contract execution with ExecuteMsg `FlashLoanReceive(FlashSwapHookMsg)`.
+    /// of a contract execution with ExecuteMsg `FlashLoanReceive(FlashLoanHookMsg)`.
     FlashLoan {
         /// The asset to receive as a loan
         receive: Coin,
         /// The contract which should receive the borrowed funds. This is the contract on which
         /// `FlashLoanReceive` will be called. If not specified, the caller's address will be used.
-        /// contract will receive the funds.
         recipient_contract: Option<String>,
         /// An optional binary encoded message to be sent back to the calling contract. This will be
-        /// included wrapped inside of the `FlashSwapHookMsg` that is sent back to the calling contract.
+        /// included wrapped inside of the `FlashLoanHookMsg` that is sent back to the calling contract.
         msg: Option<Binary>,
     },
 
@@ -129,11 +134,11 @@ pub enum PoolType {
 /// This structure describes the query messages available in the contract.
 ///
 /// Generics:
-/// - `T` - The query messages specific to the pool type
+/// - `Q` - The query messages specific to the pool type
 /// - `P` - The parameters unique to the current pool type
 #[cw_serde]
 #[derive(QueryResponses)]
-pub enum QueryMsg<T = Empty, P = Empty> {
+pub enum QueryMsg<Q = Empty, P = Empty> {
     /// Returns information about the pool in an object of type [`PoolInfoResponse`].
     #[returns(PoolInfoResponse)]
     PoolInfo {},
@@ -173,9 +178,7 @@ pub enum QueryMsg<T = Empty, P = Empty> {
     SimulateSwapExactIn {
         /// The asset to receive from the swap
         ask_denom: String,
-        /// The assets to swap for the asset specified in the `ask_denom` field. If not specified,
-        /// the native tokens sent to the contract will be swapped. This is only required if the
-        /// `callback` field is supplied, to enable flashswapping.
+        /// The assets to swap for the asset specified in the `ask_denom` field.
         offer_assets: Vec<Coin>,
         /// The pool reserves to use for the simulation. If not specified, the current reserves will be used.
         reserves: Option<Vec<Coin>>,
@@ -196,9 +199,13 @@ pub enum QueryMsg<T = Empty, P = Empty> {
         params: Option<P>,
     },
 
-    /// Query price from observations
+    /// Query the oracle price.
     #[returns(OracleObservation)]
-    Observe { seconds_ago: u64 },
+    OraclePrice {
+        /// The UNIX timestamp in seconds at which to query the oracle price. The closest observation
+        /// to this timestamp will be used.
+        timestamp: u64,
+    },
 
     /// Returns the reserves that were in the pool prior to the given block height
     #[returns(Vec<Coin>)]
@@ -206,7 +213,7 @@ pub enum QueryMsg<T = Empty, P = Empty> {
 
     /// Queries specific to the pool type
     #[returns(Empty)]
-    PoolTypeQueries(T),
+    PoolTypeQueries(Q),
 }
 
 /// This structure stores the main parameters for an Astroport pool
@@ -228,12 +235,12 @@ pub struct PoolSateResponse {
     /// The assets in the pool together with asset amounts
     pub pool_reserves: Vec<Coin>,
     /// The total amount of LP tokens currently issued
-    pub lp_token_supply: Uint128,
+    pub lp_token_supply: Coin,
 }
 
 /// This structure holds the parameters that are returned from a swap simulation response
 #[cw_serde]
-pub struct SimulateSwapResponse<T> {
+pub struct SimulateSwapResponse<T = Empty> {
     /// The assets sent to the pool for the swap
     pub offer_assets: Vec<Coin>,
     /// The asset received from the pool for the swap
@@ -264,7 +271,7 @@ pub struct ConfigResponse<P = Empty> {
 }
 
 #[cw_serde]
-pub struct ConfigUpdates<T = Empty> {
+pub struct ConfigUpdates<P = Empty> {
     /// The contract owner
     pub owner: Option<String>,
     /// The factory contract address
@@ -272,7 +279,7 @@ pub struct ConfigUpdates<T = Empty> {
     /// The fee share parameters
     pub fee_share: Option<FeeShareConfig>,
     /// The parameters unique to the current pool type
-    pub params: Option<T>,
+    pub params: Option<P>,
 }
 
 /// Holds the configuration for fee sharing
