@@ -8,6 +8,7 @@ pub mod generator;
 pub mod generator_proxy;
 #[cfg(feature = "injective")]
 pub mod injective_ext;
+pub mod legacy_pair_wrapper;
 pub mod maker;
 pub mod native_coin_registry;
 pub mod native_coin_wrapper;

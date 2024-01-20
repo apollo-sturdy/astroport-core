@@ -1,0 +1,44 @@
+[package]
+name = "astroport-legacy-pair-adapter"
+version = "1.5.0"
+authors = ["Astroport"]
+edition = "2021"
+description = "A contract which lets users interact with Astroport V2 using the old pair API"
+license = "MIT"
+
+exclude = [
+  # Those files are rust-optimizer artifacts. You might want to commit them for convenience but they should not be part of the source code publication.
+  "contract.wasm",
+  "hash.txt",
+]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# for quicker tests, cargo test --lib
+# for more explicit tests, cargo test --features=backtraces
+backtraces = ["cosmwasm-std/backtraces"]
+library = []
+
+[dependencies]
+integer-sqrt = "0.1"
+astroport = { path = "../../packages/astroport", version = "3" }
+cw2 = "0.15"
+cw20 = "0.15"
+cosmwasm-std = "1.1"
+cw-storage-plus = "0.15"
+thiserror = { version = "1.0" }
+protobuf = { version = "2", features = ["with-bytes"] }
+cosmwasm-schema = "1.1"
+cw-utils = "1.0.1"
+cw20-adapter = { git = "https://github.com/InjectiveLabs/cw20-adapter.git", rev = "5bae23a4b2a3849d7bfa736c06f76cfaae04baa5"}
+
+[dev-dependencies]
+astroport-token = { path = "../token" }
+astroport-factory = { path = "../factory" }
+proptest = "1.0"
+prost = "0.11.5"
+astroport-mocks = { path = "../../packages/astroport_mocks/" }

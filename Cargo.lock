@@ -254,6 +254,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "astroport-legacy-pair-adapter"
+version = "1.5.0"
+dependencies = [
+ "astroport 3.8.0",
+ "astroport-factory 1.6.0",
+ "astroport-mocks",
+ "astroport-token",
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cw-storage-plus 0.15.1",
+ "cw-utils 1.0.1",
+ "cw2 0.15.1",
+ "cw20 0.15.1",
+ "cw20-adapter",
+ "integer-sqrt",
+ "proptest",
+ "prost 0.11.9",
+ "protobuf",
+ "thiserror",
+]
+
+[[package]]
 name = "astroport-liquidity-manager"
 version = "1.0.3"
 dependencies = [
@@ -324,7 +346,7 @@ dependencies = [
  "cw-utils 1.0.1",
  "cw20 0.15.1",
  "cw3",
- "injective-cosmwasm",
+ "injective-cosmwasm 0.2.11",
  "schemars",
  "serde",
 ]
@@ -996,6 +1018,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cw-item-set"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05dad9dc2e6e9ab784bb5598d8528f4afe014b7b0ec05e1f466fe2e11aca368c"
+dependencies = [
+ "cosmwasm-std",
+ "cw-storage-plus 0.16.0",
+]
+
+[[package]]
 name = "cw-multi-test"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1111,6 +1143,17 @@ dependencies = [
 
 [[package]]
 name = "cw-storage-plus"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9b6f91c0b94481a3e9ef1ceb183c37d00764f8751e39b45fc09f4d9b970d469"
+dependencies = [
+ "cosmwasm-std",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "cw-storage-plus"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f0e92a069d62067f3472c62e30adedb4cab1754725c0f2a682b3128d2bf3c79"
@@ -1153,6 +1196,21 @@ dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
  "cw2 0.15.1",
+ "schemars",
+ "semver",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "cw-utils"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6a84c6c1c0acc3616398eba50783934bd6c964bad6974241eaee3460c8f5b26"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cw2 0.16.0",
  "schemars",
  "semver",
  "serde",
@@ -1242,6 +1300,19 @@ dependencies = [
 
 [[package]]
 name = "cw2"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91398113b806f4d2a8d5f8d05684704a20ffd5968bf87e3473e1973710b884ad"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cw-storage-plus 0.16.0",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "cw2"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29ac2dc7a55ad64173ca1e0a46697c31b7a5c51342f55a1e84a724da4eb99908"
@@ -1293,6 +1364,19 @@ dependencies = [
 
 [[package]]
 name = "cw20"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a45a8794a5dd33b66af34caee52a7beceb690856adcc1682b6e3db88b2cdee62"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cw-utils 0.16.0",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "cw20"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "011c45920f8200bd5d32d4fe52502506f64f2f75651ab408054d4cfc75ca3a9b"
@@ -1302,6 +1386,22 @@ dependencies = [
  "cw-utils 1.0.1",
  "schemars",
  "serde",
+]
+
+[[package]]
+name = "cw20-adapter"
+version = "1.0.0"
+source = "git+https://github.com/InjectiveLabs/cw20-adapter.git?rev=5bae23a4b2a3849d7bfa736c06f76cfaae04baa5#5bae23a4b2a3849d7bfa736c06f76cfaae04baa5"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cw-item-set",
+ "cw-storage-plus 0.16.0",
+ "cw2 0.16.0",
+ "cw20 0.16.0",
+ "injective-cosmwasm 0.1.105",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -1766,6 +1866,23 @@ name = "indoc"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa799dd5ed20a7e349f3b4639aa80d74549c81716d9ec4f994c9b5815598306"
+
+[[package]]
+name = "injective-cosmwasm"
+version = "0.1.105"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74b2d3b5cfe251bfe4d7f1aea33ad98886f2a01cefafaac4e14e86ad23822729"
+dependencies = [
+ "cosmwasm-std",
+ "cw-storage-plus 0.15.1",
+ "ethereum-types",
+ "hex",
+ "injective-math",
+ "schemars",
+ "serde",
+ "serde_repr",
+ "subtle-encoding",
+]
 
 [[package]]
 name = "injective-cosmwasm"
