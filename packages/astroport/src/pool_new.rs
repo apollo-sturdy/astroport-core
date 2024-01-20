@@ -28,14 +28,25 @@ pub struct FlashLoanHookMsg {
 }
 
 #[cw_serde]
+pub struct Price {
+    /// The denom of the asset to query the price for
+    pub base_asset: String,
+    /// The denom of the asset to quote the price in
+    pub quote_asset: String,
+    /// The price of the base asset quoted in terms of the quote asset. I.e. the number of quote
+    /// assets per base asset.
+    pub price: Decimal,
+}
+
+#[cw_serde]
 /// Protects the user from slippage by ensuring that the price of the pool does not move too much.
 /// If the execution price of the action is more than `slippage_tolerance` percent different
 /// from the price supplied in the `belief_price` field, the transaction will revert.
 pub struct SlippageControl {
     /// The user's belief of the price of the pool before the action.
-    belief_price: Decimal,
+    pub belief_price: Price,
     /// The maximum amount of slippage that is allowed.
-    slippage_tolerance: Decimal,
+    pub slippage_tolerance: Decimal,
 }
 
 /// This structure describes the execute messages available in the contract.
@@ -49,8 +60,6 @@ pub enum ExecuteMsg<U = Empty> {
     /// Only those tokens that are already in the pool can be provided. If any additional tokens
     /// are sent, the transaction will revert.
     ProvideLiquidity {
-        /// The slippage tolerance that allows liquidity provision only if the price in the pool doesn't move too much
-        slippage_tolerance: Option<Decimal>,
         /// Determines whether the LP tokens minted for the user is auto_staked in the Generator contract
         auto_stake: Option<bool>,
         /// The recipient of the minted LP tokens
@@ -201,7 +210,7 @@ pub enum QueryMsg<Q = Empty, P = Empty> {
 
     /// Queries the time weighted average price of the `base_denom` asset quoted in terms of number
     /// of `quote_denom` assets.
-    #[returns(Decimal)]
+    #[returns(Price)]
     TwapPrice {
         /// The denom of the asset to query the price for
         base_denom: String,
