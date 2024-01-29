@@ -35,7 +35,7 @@ pub struct Price {
     pub quote_asset: String,
     /// The price of the base asset quoted in terms of the quote asset. I.e. the number of quote
     /// assets per base asset.
-    pub price: Decimal,
+    pub price: Decimal, // TODO: Research max decimal precision for 18 decimal tokens. Maybe use a Fraction?
 }
 
 #[cw_serde]
@@ -44,7 +44,8 @@ pub struct Price {
 /// from the price supplied in the `belief_price` field, the transaction will revert.
 pub struct SlippageControl {
     /// The user's belief of the price of the pool before the action.
-    pub belief_price: Price,
+    /// TODO: Clarify that this is spot price. What does that mean for PCL?
+    pub belief_prices: Vec<Price>,
     /// The maximum amount of slippage that is allowed.
     pub slippage_tolerance: Decimal,
 }
@@ -75,7 +76,8 @@ pub enum ExecuteMsg<U = Empty> {
     WithdrawLiquidity {
         /// The minimum amount of each asset to receive from the pool. If the amount received is
         /// less than this, the transaction will revert.
-        min_out: Vec<Coin>,
+        // TODO: Use #[serde(default = "vec![]")] ?
+        min_out: Option<Vec<Coin>>,
         /// Optional parameters for price based slippage control.
         slippage_control: Option<SlippageControl>,
     },
@@ -152,8 +154,8 @@ pub enum QueryMsg<Q = Empty, P = Empty> {
     #[returns(PoolInfoResponse)]
     PoolInfo {},
 
-    /// Returns information about a pool in an object of type [`PoolResponse`].
-    #[returns(PoolSateResponse)]
+    /// Returns information about a pool in an object of type [`PoolStateResponse`].
+    #[returns(PoolStateResponse)]
     PoolState {},
 
     /// Returns contract configuration settings in a custom [`ConfigResponse`] structure.
@@ -161,7 +163,7 @@ pub enum QueryMsg<Q = Empty, P = Empty> {
     Config {},
 
     /// Simulates providing liquidity to the pool and returns the amount of LP tokens that would be received.
-    #[returns(Coin)]
+    #[returns(Coin)] // TODO: Return also reserves_after and params_after
     SimulateProvideLiquidity {
         /// The assets to provide to the pool
         assets: Vec<Coin>,
@@ -172,7 +174,7 @@ pub enum QueryMsg<Q = Empty, P = Empty> {
     },
 
     /// Simulates withdrawing liquidity from the pool and returns the amount of assets that would be received.
-    #[returns(Vec<Coin>)]
+    #[returns(Vec<Coin>)] // TODO: Return also reserves_after and params_after
     SimulateWithdrawLiquidity {
         /// The amount of LP tokens to withdraw
         amount: Uint128,
@@ -233,6 +235,7 @@ pub enum QueryMsg<Q = Empty, P = Empty> {
     },
 
     /// Returns the reserves that were in the pool prior to the given block height
+    /// TODO: Should this be a custom query?
     #[returns(Vec<Coin>)]
     PoolReservesAtHeight { block_height: Uint64 },
 
@@ -256,7 +259,7 @@ pub struct PoolInfoResponse {
 
 /// This struct is used to return a query result with the total amount of LP tokens and assets in a specific pool.
 #[cw_serde]
-pub struct PoolSateResponse {
+pub struct PoolStateResponse {
     /// The assets in the pool together with asset amounts
     pub pool_reserves: Vec<Coin>,
     /// The total amount of LP tokens currently issued
@@ -272,10 +275,13 @@ pub struct SimulateSwapResponse<T = Empty> {
     pub return_asset: Coin,
     /// The change in spot price caused by the swap, in percentage form
     pub price_impact: Decimal,
-    /// The fees charged for the swap
-    pub commission: Coin,
     /// The difference in percentage between the prior spot price and the execution price
+    /// TODO: rename to something else? Since we have no belief price here. Or also return slippage which would be
+    /// the difference between the users supplied belief price?
     pub slippage: Decimal,
+    /// The fees charged for the swap
+    /// TODO: Should be Vec<Coin> If a pool ever wants to charge commision in multiple assets?
+    pub commission: Coin,
     /// The pool reserves after the swap
     pub reserves_after: Vec<Coin>,
     /// The parameters unique to the current pool type after the swap

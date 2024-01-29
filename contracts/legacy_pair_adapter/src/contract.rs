@@ -22,7 +22,7 @@ use astroport::pair::{
     Cw20HookMsg, MigrateMsg, PoolResponse, QueryMsg, ReverseSimulationResponse, SimulationResponse,
 };
 use astroport::pool_new::{
-    ExecuteMsg as PoolExecuteMsg, PoolSateResponse, Price, QueryMsg as PoolQueryMsg,
+    ExecuteMsg as PoolExecuteMsg, PoolStateResponse, Price, QueryMsg as PoolQueryMsg,
     SimulateSwapResponse, SlippageControl,
 };
 use astroport::querier::{query_factory_config, query_pair_info};
@@ -824,7 +824,7 @@ pub fn query_pool(deps: Deps) -> StdResult<PoolResponse> {
 
     // Query underlying pool
     let underlying_pool = UNDERLYING_POOL.load(deps.storage)?;
-    let res: PoolSateResponse = deps
+    let res: PoolStateResponse = deps
         .querier
         .query_wasm_smart(underlying_pool, &PoolQueryMsg::<Empty>::PoolState {})?;
 
